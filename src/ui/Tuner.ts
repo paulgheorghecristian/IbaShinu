@@ -28,6 +28,8 @@ const NEEDS_RELOAD = [
   'FX.fireCapacity',
   'FX.atlas',
   'SUN.mapSize',
+  'POST.samples',
+  'POST.ao.reuseDepth',
   'UI.antialias',
   'COLORS',
 ]
@@ -41,6 +43,11 @@ const INTEGERS = new Set([
   'FX.fireCapacity',
   'FX.impactSmoke',
   'FX.impactSparks',
+  'POST.samples',
+  'POST.ao.samples',
+  'POST.ao.debugOutput',
+  'POST.ao.denoiseSamples',
+  'POST.ao.denoiseRings',
 ])
 
 const CSS = `

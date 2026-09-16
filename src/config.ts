@@ -488,6 +488,89 @@ export const SUN = {
   focusHeight: 2,
 }
 
+/**
+ * Post-processing.
+ *
+ * On, and the chain is the shipped look. Turning `enabled` off is genuinely off
+ * rather than a bypass: the scene draws straight to the canvas, which is also
+ * the only path that gets the free MSAA `antialias: true` takes from the default
+ * framebuffer. Nothing drawn through an EffectComposer ever reaches that
+ * framebuffer, so inside post the anti-aliasing has to be asked for by hand —
+ * hence `samples`. Tone mapping likewise moves from per-material to a final
+ * pass, and three mixes scene fog before it there rather than after, so the same
+ * fog colour lands a little differently between the two paths; `SUN.exposure` is
+ * the dial if it matters.
+ */
+export const POST = {
+  enabled: true,
+  /** MSAA samples on the composer's target. 0 turns anti-aliasing off entirely. */
+  samples: 2,
+  /**
+   * Fraction of the drawing buffer every pass runs at, the final upscale to the
+   * canvas included. Scales the render pass, the occlusion prepass and the bloom
+   * mips together; cost goes with the square.
+   */
+  resolutionScale: 0.75,
+
+  /**
+   * Bloom. The palette is full of things built to glow — trap markers,
+   * checkpoint rings, the gale volume, the spike's warning decal. The threshold
+   * is high on purpose: those are unlit basic materials at full colour, and at
+   * 0.72 the gale's volume takes over the screen.
+   */
+  bloom: { enabled: true, strength: 0.22, radius: 0.4, threshold: 0.85 },
+
+  /**
+   * Ground-truth ambient occlusion. On, and it has to be paid for honestly: the
+   * earlier note that it cost more than the whole rest of the frame was measured
+   * under SwiftShader, Chromium's software rasteriser, which charges CPU prices
+   * per fragment and says nothing about a GPU. What it did cost is largely gone
+   * — see `reuseDepth` and `denoiseSamples` below, which between them delete a
+   * whole scene render and halve the denoise. If a weak machine still cannot
+   * hold a frame, `resolutionScale` is the dial before `enabled` is. Radius is
+   * in world units — three's default of 0.35 is sized for props on a desk, not
+   * metre-scale boxes. `debugOutput` is GTAOPass.OUTPUT: -1 off, 0 the
+   * normal composited image, 1 diffuse only, 2 depth, 3 normals, 4 raw AO,
+   * 5 denoised AO.
+   */
+  ao: {
+    enabled: true,
+    radius: 1.2,
+    distanceExponent: 1,
+    thickness: 1,
+    scale: 1,
+    samples: 8,
+    resolutionScale: 0.5,
+    blend: 0.9,
+    debugOutput: 0,
+
+    /**
+     * Read depth from the render pass instead of drawing the scene a second time.
+     *
+     * GTAOPass ships expecting to own its G-buffer: every frame it re-renders
+     * the whole scene with a normal material to get normals and depth, which is
+     * a full geometry pass in aid of a screen-space effect. The composer's
+     * target already holds that depth, so handing it over deletes the pass
+     * outright and the shader reconstructs normals from depth instead. They come
+     * out softer, and they are reconstructed at the AO resolution rather than the
+     * chain's, so a hard crease can shimmer; that is the price of one whole
+     * scene render per frame, and on any real GPU it is worth paying.
+     */
+    reuseDepth: true,
+    /**
+     * Poisson denoise taps over the raw AO, and the rings they spiral into.
+     *
+     * three defaults to 16, which costs more per pixel than the AO it is
+     * cleaning up — at `samples: 8` the AO pass itself is nine taps. Nothing in
+     * the pass surfaces this, so it was quietly the most expensive thing in the
+     * chain. 8 keeps most of the smoothing for half the bandwidth; go to 4
+     * before you start cutting `samples`.
+     */
+    denoiseSamples: 8,
+    denoiseRings: 2,
+  },
+}
+
 /** Small pieces of on-screen furniture that are not the HUD proper. */
 export const UI = {
   /**
@@ -541,7 +624,7 @@ export const DOG_NAMES = [
  * material's colour, the size of a buffer — needs a reload, and the tuner says so
  * rather than pretending otherwise.
  */
-export const TUNABLES = { PHYSICS, RUNNER, TRAPS, CAMERA, RACE, AI, DOG, VIEW, FX, SUN, UI, COLORS }
+export const TUNABLES = { PHYSICS, RUNNER, TRAPS, CAMERA, RACE, AI, DOG, VIEW, FX, POST, SUN, UI, COLORS }
 
 export type Tunables = typeof TUNABLES
 

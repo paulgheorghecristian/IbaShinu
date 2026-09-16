@@ -321,7 +321,9 @@ class Game {
   /** What the frame is actually being drawn at, post chain included. */
   renderSize(): string {
     const buffer = this.renderer.renderer.getDrawingBufferSize(new THREE.Vector2())
-    return `${buffer.x}x${buffer.y}`
+    const post = this.renderer.postSize
+    const canvas = `${buffer.x}x${buffer.y}`
+    return post ? `${canvas} · post ${post.width}x${post.height}` : canvas
   }
 
   /**

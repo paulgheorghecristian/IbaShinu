@@ -1,5 +1,10 @@
 import * as THREE from 'three'
-import { CAMERA, COLORS, SUN, UI, VIEW } from '../config'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
+import { CAMERA, COLORS, POST, SUN, UI, VIEW } from '../config'
 
 /** Vertical gradient sky. Cheaper and moodier than a cubemap for a prototype. */
 const SKY_VERT = /* glsl */ `
@@ -48,6 +53,12 @@ export class Renderer {
   private readonly shadowFocus = new THREE.Vector3()
   private readonly sky: THREE.Mesh
   private readonly fill: THREE.HemisphereLight
+  /** Built only if POST.enabled was set at load; null means draw straight out. */
+  private composer: EffectComposer | null = null
+  private ao: GTAOPass | null = null
+  private bloom: UnrealBloomPass | null = null
+  /** The depth texture the AO pass is currently reading, so it is only re-aimed on a change. */
+  private aoDepth: THREE.DepthTexture | null = null
 
   constructor(readonly canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -111,8 +122,9 @@ export class Renderer {
     this.scene.add(this.sun)
     this.scene.add(this.sun.target)
 
-    // Push the tunables that were copied into objects at construction, so the
-    // panel's saved values are in place before the first frame.
+    // The composer builds itself on the first refresh that finds POST on, which
+    // is also what puts the configured values into the passes before the first
+    // frame rather than waiting for the tuner to nudge them.
     this.refresh()
 
     this.resize()
@@ -156,6 +168,118 @@ export class Renderer {
     this.renderer.setSize(w, h, false)
     this.camera.aspect = w / h
     this.camera.updateProjectionMatrix()
+    if (!this.composer) return
+
+    // In drawing-buffer pixels, not CSS ones: EffectComposer sizes its targets
+    // to exactly what it is given.
+    const ratio = this.renderer.getPixelRatio()
+    const cw = Math.max(1, Math.round(w * ratio * POST.resolutionScale))
+    const ch = Math.max(1, Math.round(h * ratio * POST.resolutionScale))
+    this.composer.setSize(cw, ch)
+    this.syncDepthSize(cw, ch)
+    this.bloom?.setSize(cw, ch)
+    // Sized against the chain rather than the canvas, so the two scales compose.
+    this.ao?.setSize(
+      Math.max(1, Math.round(cw * POST.ao.resolutionScale)),
+      Math.max(1, Math.round(ch * POST.ao.resolutionScale)),
+    )
+  }
+
+  /**
+   * Point the AO pass at the depth of the buffer the scene was actually drawn into.
+   *
+   * RenderPass draws into the composer's *read* buffer, and that starts life as
+   * `renderTarget2` rather than 1. Which buffer it is then flips whenever a frame
+   * performs an odd number of swaps, and that depends on which passes are
+   * enabled — turning AO off removes one, so toggling it inverts the pairing for
+   * every frame after. Handing the pass a single depth texture once, at build
+   * time, therefore aims it at a target the scene is never drawn into: the AO
+   * samples cleared depth, finds nothing to occlude, and quietly does nothing.
+   * Following the read buffer costs one reference comparison a frame.
+   */
+  private aimAoAtSceneDepth(): void {
+    if (!this.ao || !this.composer || !POST.ao.reuseDepth) return
+    const depth = this.composer.readBuffer.depthTexture
+    if (!depth || depth === this.aoDepth) return
+    // undefined for the normal texture deliberately: with none, the shader
+    // compiles its reconstruct-from-depth path and the G-buffer pass stays off.
+    this.ao.setGBuffer(depth, undefined)
+    this.aoDepth = depth
+  }
+
+  /**
+   * Keep the depth attachment the same size as the colour one.
+   *
+   * `RenderTarget.setSize` resizes the colour textures and stops there, so a
+   * depth texture holds whatever size it was built at and the first window
+   * resize leaves the framebuffer with attachments of two different sizes —
+   * incomplete, and the MSAA resolve fails on every frame after. The composer
+   * ping-pongs between two targets and the second is a clone carrying a depth
+   * texture of its own, so both need telling.
+   */
+  private syncDepthSize(w: number, h: number): void {
+    if (!this.composer) return
+    for (const target of [this.composer.renderTarget1, this.composer.renderTarget2]) {
+      const depth = target.depthTexture
+      if (!depth || (depth.image.width === w && depth.image.height === h)) continue
+      depth.image.width = w
+      depth.image.height = h
+      depth.needsUpdate = true
+    }
+  }
+
+  /**
+   * The composer path.
+   *
+   * `antialias: true` buys MSAA on the default framebuffer, and nothing drawn
+   * through a composer ever reaches it — so the target asks for samples of its
+   * own. Half-float, because bloom needs headroom above 1.0 to have anything to
+   * find.
+   */
+  private buildComposer(): void {
+    const size = this.renderer.getSize(new THREE.Vector2())
+    // The render pass writes depth here and the AO pass reads it back, which is
+    // what lets the AO skip re-rendering the scene. Multisampling is no
+    // obstacle — three resolves the depth buffer into this texture, and
+    // `resolveDepthBuffer` is on by default — but the resolve is a
+    // `blitFramebuffer`, and that rejects a depth-only renderbuffer blitted
+    // into a depth+stencil texture. `stencilBuffer` is false on a render target
+    // unless asked for, so the buffer being resolved is DEPTH_COMPONENT24 and
+    // the texture has to say the same. GTAOPass's own G-buffer uses
+    // depth+stencil, which is fine there because nothing ever blits it; copy
+    // that choice here and every frame logs GL_INVALID_OPERATION and the AO
+    // reads whatever stale depth it can find.
+    let depthTexture: THREE.DepthTexture | null = null
+    if (POST.ao.reuseDepth) {
+      depthTexture = new THREE.DepthTexture(size.x, size.y)
+      depthTexture.format = THREE.DepthFormat
+      depthTexture.type = THREE.UnsignedIntType
+    }
+    const target = new THREE.WebGLRenderTarget(size.x, size.y, {
+      type: THREE.HalfFloatType,
+      samples: POST.samples,
+      depthTexture,
+    })
+    const composer = new EffectComposer(this.renderer, target)
+    // RenderPass draws into the read buffer and does not swap, so the depth
+    // above is the depth of the frame the AO pass is about to shade.
+    composer.addPass(new RenderPass(this.scene, this.camera))
+    this.ao = new GTAOPass(this.scene, this.camera, size.x, size.y)
+    composer.addPass(this.ao)
+    this.bloom = new UnrealBloomPass(size, POST.bloom.strength, POST.bloom.radius, POST.bloom.threshold)
+    composer.addPass(this.bloom)
+    // Tone mapping and the colour-space conversion happen here instead of in
+    // each material: three turns those off in-shader when drawing into a
+    // render target, and this pass puts them back at the end.
+    composer.addPass(new OutputPass())
+    this.composer = composer
+  }
+
+  /** What the post chain is actually running at. Surfaced for the frame counter. */
+  get postSize(): { width: number; height: number } | null {
+    if (!this.composer || !POST.enabled) return null
+    const t = this.composer.renderTarget1
+    return { width: t.width, height: t.height }
   }
 
 
@@ -166,6 +290,16 @@ export class Renderer {
    * tuning panel would otherwise appear to do nothing when they are dragged.
    */
   refresh(): void {
+    // Built here rather than in the constructor, and on demand rather than once.
+    // Gating construction on the value POST.enabled happened to hold at load
+    // left `ao` and `bloom` null for the rest of the session whenever post was
+    // off, and every POST.ao / POST.bloom control in the tuner then did nothing
+    // at all — silently, because neither is listed as needing a reload. The only
+    // way back was to toggle POST, which does ask for one. Building on first use
+    // makes all of it live, and the branch in render() still decides whether the
+    // chain is drawn through at all.
+    if (POST.enabled && !this.composer) this.buildComposer()
+
     this.renderer.toneMappingExposure = SUN.exposure
     this.sun.color.setHex(SUN.color)
     this.sun.intensity = SUN.intensity
@@ -174,6 +308,29 @@ export class Renderer {
     this.fill.intensity = SUN.ambientIntensity
 
     this.resize()
+    if (this.ao) {
+      this.ao.enabled = POST.ao.enabled
+      this.ao.blendIntensity = POST.ao.blend
+      this.ao.output = POST.ao.debugOutput
+      this.ao.updateGtaoMaterial({
+        radius: POST.ao.radius,
+        distanceExponent: POST.ao.distanceExponent,
+        thickness: POST.ao.thickness,
+        scale: POST.ao.scale,
+        samples: POST.ao.samples,
+      })
+      this.ao.updatePdMaterial({
+        samples: POST.ao.denoiseSamples,
+        rings: POST.ao.denoiseRings,
+      })
+    }
+    if (this.bloom) {
+      this.bloom.enabled = POST.bloom.enabled
+      this.bloom.strength = POST.bloom.strength
+      this.bloom.radius = POST.bloom.radius
+      this.bloom.threshold = POST.bloom.threshold
+    }
+
     this.camera.fov = CAMERA.fov
     this.camera.far = VIEW.cameraFar
     this.camera.updateProjectionMatrix()
@@ -205,6 +362,11 @@ export class Renderer {
     // and every course here is far longer than that — run past it and the
     // backdrop becomes the clear colour, with scenery emerging from flat black.
     this.sky.position.copy(this.camera.position)
-    this.renderer.render(this.scene, this.camera)
+    if (this.composer && POST.enabled) {
+      this.aimAoAtSceneDepth()
+      this.composer.render()
+    } else {
+      this.renderer.render(this.scene, this.camera)
+    }
   }
 }

@@ -361,11 +361,45 @@ world geometry on separate layers: a runner collides with the course and nothing
 else, and every ray — ground checks, AI gap probes, the camera boom — filters to
 world only. A pack of dogs on one narrow ledge is a race, not a shoving match.
 
-**Post-processing was tried and removed.** GTAO and bloom went in behind an
-`EffectComposer`, measured, and came out again: the player asked for the plain
-game back, and code that is switched off still has to be carried. What the
-attempt established is recorded in the paragraph below, and the one thing worth
-keeping from it is the corner frame counter, `UI.showFps`.
+**Post-processing is in, and on.** `` ` `` → POST is an `EffectComposer` running
+bloom and GTAO, and it is the shipped look. Turning `enabled` off is a real path
+rather than a bypass — the scene draws straight to the canvas as it always did —
+and it is the first thing to try on a machine that cannot hold a frame. Two
+things to know about the difference between the two paths.
+`antialias: true` buys MSAA on the default framebuffer, which a composer never
+reaches, so the target asks for `POST.samples` of its own. And tone mapping moves
+to a final pass, where three mixes scene fog before it rather than after, so the
+same fog colour lands a little differently; `SUN.exposure` compensates.
+`POST.resolutionScale` runs the whole chain at a fraction of the drawing buffer
+and is the dial that buys frames back. GTAO's radius is in world units — three's
+default of 0.35 is sized for props on a desk, not metre-scale boxes.
+
+**The AO was never as expensive as it looked.** The measurement that condemned it
+was taken under SwiftShader — Chromium's software rasteriser, which is what
+headless gets unless it is fought — where a screen-space effect costs what a
+software renderer charges for fragments, not what a GPU does. That number says
+nothing about the machine the game runs on. Two things were paying for it anyway.
+GTAOPass owns its G-buffer by default and re-renders the entire scene with a
+normal material every frame, a full geometry pass in aid of a screen-space
+effect, when the composer's target already holds the depth it needs;
+`POST.ao.reuseDepth` hands that depth over and the pass disappears, the shader
+reconstructing normals from depth instead. And the Poisson denoise that cleans
+the raw AO defaults to sixteen taps per pixel — more than the AO itself, which is
+nine at `samples: 8` — with nothing on the pass to surface it;
+`POST.ao.denoiseSamples` does. Reusing the depth is not free of detail: normals
+come out softer and are reconstructed at the AO resolution rather than the
+chain's, so a hard crease can shimmer. Turn it off and the geometry pass comes
+back.
+
+Reusing a depth texture across an MSAA resolve has two traps, both of which throw
+GL errors every frame and neither of which stops the scene drawing, so they are
+easy to ship. The resolve is a `blitFramebuffer`, and it refuses to blit a
+depth-only renderbuffer into a depth+stencil texture: `stencilBuffer` is false on
+a render target unless asked for, so the texture has to be `DepthFormat`, not the
+`DepthStencilFormat` GTAOPass uses for the G-buffer it never blits. And
+`RenderTarget.setSize` resizes colour attachments and stops, leaving the depth
+texture at its original size and the framebuffer incomplete after the first
+window resize — both of the composer's targets need their depth resized by hand.
 
 **A round of renderer optimisation was tried and reverted.** Static scenery
 merged into chunked meshes, all sixty-eight warning rings as one instanced draw,
@@ -602,6 +636,12 @@ The things most worth touching first:
 - `UI.pixelRatio` — resolution; `1` is the biggest single saving there is
 - `UI.antialias` — MSAA on the canvas; the second thing to turn off on a weak GPU (reload)
 - `UI.showFps` — the corner frame counter
+- `POST.enabled` — the composer; `POST.bloom` and `POST.ao` are live once it is on
+- `POST.resolutionScale` / `POST.ao.resolutionScale` — the post chain's own scales
+- `POST.ao.reuseDepth` — drops a whole scene render; off restores GTAOPass's own
+  G-buffer pass (reload)
+- `POST.ao.denoiseSamples` — taps over the raw AO; three's 16 costs more than the
+  AO does
 - `SUN.color` / `intensity` / `ambientSky` / `ambientGround` / `exposure` — the whole
   lighting mood, and the one to reach for if post-processing shifts it
 - `RUNNER.holdToJump` — `false`; set it `true` if you want bunny hopping back
