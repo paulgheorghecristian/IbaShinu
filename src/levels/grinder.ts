@@ -59,12 +59,19 @@ export const grinder: Level = {
     b.checkpoint(53, new THREE.Vector3(0, 1.6, 55), 'Spike Alley')
     b.route(0, 55)
 
-    // ---- The cascade: 58..100. Ten tiles that go in a wave ---------------
-    // Straight and closely spaced, so it is trivial standing still and lethal
-    // once the wave starts: the run has to be taken at pace, in one go.
+    // ---- The cascade: 58..100. Eight tiles that go in a wave -------------
+    // Straight and spaced to be jumped, so it is trivial standing still and
+    // lethal once the wave starts: the run has to be taken at pace, in one go.
+    //
+    // The spacing is a jump, not a stride. Ten tiles at 4.2 left a 1.2 m gap
+    // between them, and the ball is 1.1 m across: too narrow to read as a jump,
+    // too wide to roll over, so the dog dropped into every one and was shoved
+    // back out by the next edge — a run across it bobbed the whole way. Eight at
+    // 5.2 opens the gap to 2.2 m, inside the ~3.2 m a tile's run-up buys, and the
+    // last tile stops clear of the landing pad instead of ending inside it.
     const bridge: number[] = []
-    for (let i = 0; i < 10; i += 1) {
-      const z = 61 + i * 4.2
+    for (let i = 0; i < 8; i += 1) {
+      const z = 61 + i * 5.2
       const x = i % 2 ? 0.8 : -0.8
       bridge.push(b.dropTile(x, z, TILE))
       b.route(x, z, 0, TILE / 2 - 0.7)
@@ -191,13 +198,15 @@ export const grinder: Level = {
     // ---- Twin cascades: 362..410. Two waves, back to back ----------------
     // Split into two runs so the second starts while you are still committed to
     // the first: there is no safe tile to stop and read from.
+    // Spaced like the first cascade and for the same reason: at 4 m the gap was
+    // 1.0 m against a 1.1 m ball, which is a stumble rather than a jump.
     const first: number[] = []
     const second: number[] = []
-    for (let i = 0; i < 12; i += 1) {
-      const z = 365 + i * 4
+    for (let i = 0; i < 9; i += 1) {
+      const z = 365 + i * 5.2
       const x = i % 2 ? 0.8 : -0.8
       const tile = b.dropTile(x, z, TILE)
-      ;(i < 6 ? first : second).push(tile)
+      ;(i < 5 ? first : second).push(tile)
       b.route(x, z, 0, TILE / 2 - 0.7)
     }
     b.trap({ kind: 'cascade', tiles: first })

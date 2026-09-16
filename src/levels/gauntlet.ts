@@ -63,7 +63,12 @@ export const gauntlet: Level = {
     b.route(0, 121)
 
     // ---- The slide: wait for the platform, then step on ------------------
-    b.pad(0, 126, 10, 5, COLORS.platform)
+    // Starts at 124, where the safe pad ends, rather than 123.5. Both slabs put
+    // their walking surface at y=0, so half a metre of overlap is half a metre
+    // of two coplanar faces arguing over the depth buffer, in a band right
+    // across the lane. The far edge is what the jump to the first mover is
+    // measured from, so it does not move.
+    b.pad(0, 126.25, 10, 4.5, COLORS.platform)
     b.route(0, 126)
     for (const [z, amplitude, phase] of [
       [132, 2.6, 0],
@@ -72,7 +77,9 @@ export const gauntlet: Level = {
     ] as Array<[number, number, number]>) {
       b.route(0, z, 0, 2.2, b.mover(z, amplitude, phase))
     }
-    b.pad(0, 154, 10, 5, COLORS.platform)
+    // Ends at 156, where the safe pad begins — the same overlap as the boarding
+    // pad, mirrored. The near edge, which the last mover is jumped to, is fixed.
+    b.pad(0, 153.75, 10, 4.5, COLORS.platform)
     b.route(0, 154)
 
     b.pad(0, 159, 12, 6, COLORS.safe)
