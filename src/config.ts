@@ -211,6 +211,164 @@ export const RACE = {
   startSpacing: 2.4,
 }
 
+/**
+ * Enemy mode: you stop the pack instead of joining it.
+ *
+ * Every dog is a bot and you are the saboteur, in first person, in a booth that
+ * rides the course alongside the leader. The traps are not yours to touch
+ * directly — the booth has a console, one button per machine, and a button is
+ * fired by looking at it and pressing E. Cooldowns are the whole game: the
+ * course has more traps than you can keep lit, so the choice is which one is
+ * worth spending on the dog in front of you right now.
+ *
+ * `TrapSystem` stops firing on its own the moment somebody is manning it, which
+ * is what `autoInterval` always meant.
+ */
+export const ENEMY = {
+  /**
+   * Wipeouts a runner survives before it is out for good. One: a dog that falls
+   * is dead.
+   *
+   * Runners respawn at their last checkpoint forever in a normal race, so in this
+   * mode a wipeout has to be worth something or "stop them finishing" is
+   * unwinnable — the clock is on their side and they only have to keep trying.
+   *
+   * It was three, and three does not survive the arithmetic. Six bots at three
+   * lives is eighteen kills, and a course carries ten traps that each realistically
+   * fire once as the pack goes past: every single firing would have had to take two
+   * dogs with it, while you walked sixty metres between some of the buttons firing
+   * nothing at all. At one life the six kills needed are roughly the six best
+   * firings you can reach, which is a game. Raise it if the mode ever turns out to
+   * be too easy — it is the first dial to reach for.
+   */
+  lives: 1,
+
+  /**
+   * The gallery: a glass-fronted corridor running the whole length of the course.
+   *
+   * It is the mode's only real constraint. Every trap's button is mounted on the
+   * wall beside that trap and nowhere else, so firing one means being level with
+   * it, and the pack is moving. You cannot hold the whole course — you pick a
+   * stretch, get ahead of them, and spend what is in reach when they arrive.
+   *
+   * The floor follows the course's own height, sampled at build time, so the
+   * gallery climbs when the course climbs and you are always looking across at
+   * the racing line rather than down a well or up at a ceiling.
+   */
+  gallery: {
+    /**
+     * Centreline offset from the racing line.
+     *
+     * Set by the widest thing on any course, not by taste: the gauntlet's arena is
+     * 19 m across, so the racing line reaches x=9.5, and a gallery whose glass sat
+     * inside that would have dogs pressed against the window — and, on the arena,
+     * inside the corridor. Glass lands at `x - width/2`, so this clears the widest
+     * course by a little over two metres.
+     */
+    x: 13.5,
+    width: 3.2,
+    height: 2.8,
+    /** Corridor either side of the course proper, so the ends are not cliffs. */
+    margin: 12,
+    /**
+     * How often the course floor is sampled for the gallery's height, and the
+     * step that is rounded to before smoothing.
+     */
+    sampleStep: 2,
+    sampleQuantum: 0.5,
+    /**
+     * Metres a change in height is spread over, which is what makes the gallery
+     * ramp instead of step.
+     *
+     * A step is not a cosmetic problem. The course climbs eight metres in places,
+     * and a gallery that climbed it in one jump would put the wall between you
+     * and the traps you are meant to be watching — and strand the buttons for
+     * them at the top of a face you cannot walk up. Spreading the rise over a run
+     * this long keeps the floor walkable and the window level with the action the
+     * whole way.
+     */
+    rampRun: 9,
+    /** Slope change, in metres of rise per metre, that starts a new floor segment. */
+    slopeTolerance: 0.02,
+  },
+
+  /**
+   * Walk speed, and it is the balance of the whole mode.
+   *
+   * Above the dogs' 7.4 m/s ground speed, because the corridor is straight and
+   * level and the course is neither — a runner spends its speed on jumps and
+   * corners, and the enemy does not. Far enough above to get ahead of the pack
+   * if you commit to it; not so far that being everywhere is free.
+   */
+  moveSpeed: 8.6,
+  eyeHeight: 1.62,
+
+  /**
+   * How close you have to stand to a button to use it.
+   *
+   * The reason the mode is about movement. Aiming at a button from thirty metres
+   * down the corridor does nothing — you have to be at it, which is what makes
+   * choosing one trap mean giving up another.
+   */
+  reach: 2.8,
+  /**
+   * Mounted on the window, level with the trap they fire.
+   *
+   * Height is set against the sightline, not comfort. Eye height is 1.62 and the
+   * dogs are a metre below that thirteen metres out, which puts them 4.5° under
+   * level — so the button and its backplate have to sit lower than that or they
+   * cover the only thing you are watching. At 1.2 with a 1.7x plate the plate's
+   * top edge landed at exactly 4.5° and clipped them; 1.1 with a 1.3x plate
+   * starts at 11° and leaves them clear.
+   */
+  button: {
+    height: 1.1,
+    size: 0.36,
+    plate: 1.3,
+    /**
+     * Four states, and the glow is reserved for two of them:
+     *
+     *   ready, not looked at   its own colour, unlit — a button, sitting there
+     *   looked at              glows
+     *   trap running           glows, whether you are still looking or not
+     *   cooling                grey
+     *
+     * Spending the glow on *everything* available was what made the wall unreadable
+     * earlier: ten lit squares down a corridor say nothing, because the thing worth
+     * knowing is not "these exist" but "this is the one I am about to press, and
+     * that one is still recharging". An armed button is legible from its colour
+     * alone; the emissive is what marks the two states that are actually events.
+     *
+     * `lit` is a target *luminance*, not an emissive intensity, and each button
+     * solves for the intensity that reaches it.
+     *
+     * One intensity across eight colours does not give eight equal glows, because
+     * luminance is hue-weighted — Rec.709 pays green 0.7152, red 0.2126 and blue
+     * 0.0722. At a flat 1.6 the gale and the trapdoor cleared `POST.bloom.threshold`
+     * of 0.85 and everything else did not: the wrecker's red landed at 0.525, which
+     * is not a dim glow but *no bloom at all*, so it rendered as a flat pastel
+     * square next to a yellow that was blazing. Dividing the target by each
+     * colour's own luminance is what makes one dial mean one thing.
+     *
+     * Keep it above the bloom threshold or nothing glows at all; `maxGain` is the
+     * ceiling for a colour dark enough that the division runs away.
+     */
+    glow: { lit: 1.05, idle: 0, maxGain: 6 },
+    /** What a button fades to while its trap recharges. */
+    coolingColor: 0x39405a,
+  },
+
+  /**
+   * Degrees off the crosshair a button can be and still count as aimed at.
+   *
+   * Generous, because a button you are standing next to subtends a wide angle
+   * and a tight cone would mean staring straight at a box a metre away instead
+   * of watching the dogs you are trying to catch.
+   */
+  aimCone: 18,
+}
+
+
 export const AI = {
   /** Per-bot multipliers are randomised inside these bounds at spawn. */
   skillMin: 0.78,
@@ -486,20 +644,27 @@ export const SUN = {
   normalBias: 0,
   /** The course is essentially flat, so pinning this stops vertical shadow swim. */
   focusHeight: 2,
+
 }
 
 /**
  * Post-processing.
  *
- * On, and the chain is the shipped look. Turning `enabled` off is genuinely off
- * rather than a bypass: the scene draws straight to the canvas, which is also
- * the only path that gets the free MSAA `antialias: true` takes from the default
- * framebuffer. Nothing drawn through an EffectComposer ever reaches that
+ * On, for the bloom. The AO below is off, which is where the frames went — it is
+ * far cheaper than it was but it is still the expensive half of the chain, and
+ * the glow is what the palette was built around.
+ *
+ * Turning `enabled` off is genuinely off and not a bypass: the scene draws
+ * straight to the canvas, which costs nothing and is also the only path that gets
+ * the free MSAA `antialias: true` takes from the default framebuffer. Nothing drawn through an EffectComposer ever reaches that
  * framebuffer, so inside post the anti-aliasing has to be asked for by hand —
  * hence `samples`. Tone mapping likewise moves from per-material to a final
  * pass, and three mixes scene fog before it there rather than after, so the same
  * fog colour lands a little differently between the two paths; `SUN.exposure` is
  * the dial if it matters.
+ *
+ * Nothing in the game depends on any of it: the sun is drawn in the sky shader,
+ * so it is there whether this is on or off.
  */
 export const POST = {
   enabled: true,
@@ -521,20 +686,23 @@ export const POST = {
   bloom: { enabled: true, strength: 0.22, radius: 0.4, threshold: 0.85 },
 
   /**
-   * Ground-truth ambient occlusion. On, and it has to be paid for honestly: the
-   * earlier note that it cost more than the whole rest of the frame was measured
+   * Ground-truth ambient occlusion. Off: it is the expensive half of the chain and
+   * frames won.
+   *
+   * It is a great deal cheaper than it was — `reuseDepth` and `denoiseSamples`
+   * below delete a whole scene render and halve the denoise between them, and the
+   * old note claiming it cost more than the entire rest of the frame was measured
    * under SwiftShader, Chromium's software rasteriser, which charges CPU prices
-   * per fragment and says nothing about a GPU. What it did cost is largely gone
-   * — see `reuseDepth` and `denoiseSamples` below, which between them delete a
-   * whole scene render and halve the denoise. If a weak machine still cannot
-   * hold a frame, `resolutionScale` is the dial before `enabled` is. Radius is
-   * in world units — three's default of 0.35 is sized for props on a desk, not
-   * metre-scale boxes. `debugOutput` is GTAOPass.OUTPUT: -1 off, 0 the
+   * per fragment and says nothing at all about a GPU. Cheaper is not free, and at
+   * `radius: 1.2` on metre-scale boxes it is a subtle effect for the price.
+   *
+   * Turn it on and `resolutionScale` is the dial before `enabled` is again. Radius
+   * is in world units — three's default of 0.35 is sized for props on a desk. `debugOutput` is GTAOPass.OUTPUT: -1 off, 0 the
    * normal composited image, 1 diffuse only, 2 depth, 3 normals, 4 raw AO,
    * 5 denoised AO.
    */
   ao: {
-    enabled: true,
+    enabled: false,
     radius: 1.2,
     distanceExponent: 1,
     thickness: 1,
@@ -624,7 +792,7 @@ export const DOG_NAMES = [
  * material's colour, the size of a buffer — needs a reload, and the tuner says so
  * rather than pretending otherwise.
  */
-export const TUNABLES = { PHYSICS, RUNNER, TRAPS, CAMERA, RACE, AI, DOG, VIEW, FX, POST, SUN, UI, COLORS }
+export const TUNABLES = { PHYSICS, RUNNER, TRAPS, CAMERA, RACE, ENEMY, AI, DOG, VIEW, FX, POST, SUN, UI, COLORS }
 
 export type Tunables = typeof TUNABLES
 

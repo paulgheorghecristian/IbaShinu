@@ -39,6 +39,16 @@ export class Hud {
   private readonly board = el('board')
   private readonly boardList = el('boardList')
   private readonly trapBar = el('traps')
+  private readonly metersEl = el('meters')
+  private readonly crosshair = el('crosshair')
+  private readonly enemyPanel = el('enemyPanel')
+  private readonly enemyRunning = el('enemyRunning')
+  private readonly enemyThrough = el('enemyThrough')
+  private readonly enemyOut = el('enemyOut')
+  private readonly enemyAim = el('enemyAim')
+  private readonly runnerRows = Array.from(
+    document.querySelectorAll<HTMLElement>('#status .runner-row'),
+  )
   private readonly help = el('help')
   private readonly toastEl = el('toast')
 
@@ -55,10 +65,71 @@ export class Hud {
       '<kbd>R</kbd> restart · <kbd>Esc</kbd> free mouse'
   }
 
+  /** Swap the corner help for the gallery's, since none of the running keys apply. */
+  useEnemyHelp(): void {
+    this.help.innerHTML =
+      '<b>Enemy</b><br>' +
+      '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk the gallery · mouse to look<br>' +
+      'every trap has one button, on the window in front of it<br>' +
+      'stand at it and press <kbd>E</kbd> — a dark button is still cooling<br>' +
+      '<kbd>R</kbd> restart · <kbd>Esc</kbd> free mouse'
+  }
+
   /** Panels that only earn their space in some configurations. */
-  configure(options: { board: boolean; trapBar: boolean }): void {
+  configure(options: { board: boolean; trapBar: boolean; enemy?: boolean }): void {
     this.board.style.display = options.board ? 'block' : 'none'
     this.trapBar.style.display = options.trapBar ? 'flex' : 'none'
+    // The runner's panels describe a dog you do not have in enemy mode: a
+    // checkpoint you are not chasing and two stamina pools you cannot spend.
+    const enemy = options.enemy === true
+    this.runnerRows.forEach((row) => (row.style.display = enemy ? 'none' : ''))
+    this.metersEl.style.display = enemy ? 'none' : ''
+    this.enemyPanel.style.display = enemy ? 'block' : 'none'
+    this.crosshair.style.display = enemy ? 'block' : 'none'
+  }
+
+  /**
+   * The enemy's readout: what is left to stop, and what the console is offering.
+   *
+   * The aimed trap is named here rather than on the button, because a label on a
+   * 30 cm box a metre away is either unreadable or the size of the button. The
+   * cooldown is spelled out in seconds for the same reason the bar exists — it
+   * is the only resource in the mode.
+   */
+  setEnemyStats(
+    time: number,
+    running: number,
+    through: number,
+    out: number,
+    aimed: Trap | null,
+    nearest: { label: string; ahead: number } | null,
+  ): void {
+    this.clock.textContent = formatTime(time)
+    this.enemyRunning.textContent = String(running)
+    this.enemyThrough.textContent = String(through)
+    this.enemyOut.textContent = String(out)
+
+    if (aimed) {
+      const cooling = aimed.cooldownLeft > 0 || aimed.active
+      const left = aimed.active ? aimed.spec.duration : aimed.cooldownLeft
+      this.enemyAim.textContent = cooling
+        ? `${aimed.spec.label} ${left.toFixed(1)}s`
+        : aimed.spec.label
+      this.enemyAim.className = cooling ? 'aim cooling' : 'aim ready'
+      return
+    }
+
+    // Nothing in reach, so the readout becomes a signpost instead. Which way to
+    // walk is the question the mode actually asks, and a bare dash does not
+    // answer it in a corridor six hundred metres long.
+    if (!nearest) {
+      this.enemyAim.textContent = '—'
+      this.enemyAim.className = 'aim'
+      return
+    }
+    const way = nearest.ahead >= 0 ? 'ahead' : 'back'
+    this.enemyAim.textContent = `${nearest.label} · ${Math.abs(Math.round(nearest.ahead))}m ${way}`
+    this.enemyAim.className = 'aim'
   }
 
   /** Name the course on the title card, and link the others. */
@@ -78,6 +149,34 @@ export class Hud {
       if (node instanceof HTMLAnchorElement) node.href = `?level=${level.id}`
       picker.append(node)
     }
+  }
+
+  /**
+   * The two ways to play, as links that keep whatever level is selected.
+   *
+   * A link rather than a button because the mode is read from the query string
+   * once, at construction — every system that cares (who owns the traps, who
+   * gets a camera, whether a dog is yours) is wired at startup, and a toggle
+   * that promised to switch mid-run would be a lie.
+   */
+  setMode(isEnemy: boolean, levelId: string): void {
+    const picker = document.getElementById('modePicker')
+    if (!picker) return
+    picker.replaceChildren()
+    for (const mode of [
+      { label: 'Play as dog', enemy: false },
+      { label: 'Play as enemy', enemy: true },
+    ]) {
+      const active = mode.enemy === isEnemy
+      const node = document.createElement(active ? 'b' : 'a')
+      node.textContent = mode.label
+      if (node instanceof HTMLAnchorElement) {
+        node.href = `?level=${levelId}${mode.enemy ? '&enemy' : ''}`
+      }
+      picker.append(node)
+    }
+    const blurb = document.getElementById('enemyBlurb')
+    if (blurb) blurb.style.display = isEnemy ? 'list-item' : 'none'
   }
 
   setStats(time: number, best: number | null, checkpoint: string, falls: number): void {

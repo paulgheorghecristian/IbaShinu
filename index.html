@@ -59,6 +59,23 @@
       .trap.cooling { opacity: 0.5; }
       .trap.poor .key { border-color: #7a2f2f; }
 
+      #status .runner-row { }
+      #enemyPanel .aim {
+        margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.09);
+        font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+      }
+      #enemyPanel .aim.ready { color: var(--accent); }
+      #enemyPanel .aim.cooling { color: #8b93ab; }
+      /* First person needs a point of aim: the console buttons are looked at, not clicked. */
+      #crosshair {
+        display: none; position: absolute; left: 50%; top: 50%; width: 14px; height: 14px;
+        margin: -7px 0 0 -7px;
+      }
+      #crosshair::before, #crosshair::after {
+        content: ''; position: absolute; background: rgba(255,255,255,0.75);
+      }
+      #crosshair::before { left: 50%; top: 0; width: 2px; height: 100%; margin-left: -1px; }
+      #crosshair::after { top: 50%; left: 0; height: 2px; width: 100%; margin-top: -1px; }
       #meters { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); display: flex; gap: 16px; }
       .meter { width: 150px; text-align: center; }
       .meter .bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.10); overflow: hidden; }
@@ -93,13 +110,14 @@
       #overlay .card { max-width: 560px; padding: 34px 40px; text-align: left; }
       #overlay h1 { margin: 0; font-size: 46px; letter-spacing: 0.10em; color: var(--accent); }
       #overlay .tag { color: var(--muted); font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase; margin: 6px 0 14px; }
-      #levelPicker { display: flex; gap: 10px; margin: 0 0 20px; font-size: 12px; letter-spacing: 0.06em; }
-      #levelPicker a, #levelPicker b {
+      #levelPicker, #modePicker { display: flex; gap: 10px; margin: 0 0 12px; font-size: 12px; letter-spacing: 0.06em; }
+      #modePicker { margin-bottom: 20px; }
+      #levelPicker a, #levelPicker b, #modePicker a, #modePicker b {
         pointer-events: auto; padding: 5px 11px; border-radius: 6px; text-decoration: none;
         border: 1px solid var(--line); color: var(--muted);
       }
-      #levelPicker b { background: var(--accent); border-color: var(--accent); color: #16181d; font-weight: 700; }
-      #levelPicker a:hover { color: var(--text); border-color: var(--accent); }
+      #levelPicker b, #modePicker b { background: var(--accent); border-color: var(--accent); color: #16181d; font-weight: 700; }
+      #levelPicker a:hover, #modePicker a:hover { color: var(--text); border-color: var(--accent); }
       #overlay p { font-size: 13px; line-height: 1.75; color: #c3cbdb; margin: 0 0 14px; }
       #overlay ul { margin: 0 0 22px; padding-left: 18px; font-size: 12.5px; line-height: 1.9; color: #c3cbdb; }
       #overlay kbd {
@@ -119,9 +137,15 @@
     <div id="hud">
       <div id="status" class="panel">
         <div class="time" id="clock">0:00.00</div>
-        <div class="row"><span>Best</span><b id="best">—</b></div>
-        <div class="row"><span>Checkpoint</span><b id="cp">0/0</b></div>
-        <div class="row"><span>Wipeouts</span><b id="falls">0</b></div>
+        <div class="row runner-row"><span>Best</span><b id="best">—</b></div>
+        <div class="row runner-row"><span>Checkpoint</span><b id="cp">0/0</b></div>
+        <div class="row runner-row"><span>Wipeouts</span><b id="falls">0</b></div>
+        <div id="enemyPanel" style="display: none">
+          <div class="row"><span>Running</span><b id="enemyRunning">0</b></div>
+          <div class="row"><span>Through</span><b id="enemyThrough">0</b></div>
+          <div class="row"><span>Out</span><b id="enemyOut">0</b></div>
+          <div class="aim" id="enemyAim">—</div>
+        </div>
       </div>
 
       <div id="board" class="panel" style="display: none">
@@ -143,6 +167,7 @@
       <div id="traps" class="panel"></div>
 
       <div id="help" class="panel"></div>
+      <div id="crosshair"></div>
       <div id="toast"></div>
     </div>
 
@@ -151,6 +176,7 @@
         <h1>IBA SHINU</h1>
         <div class="tag">Deathrun Prototype — client-only</div>
         <div id="levelPicker"></div>
+        <div id="modePicker"></div>
         <p>
           One very round proto-shiba, one gauntlet of platforms, and ten machines that
           would rather you did not reach the gate.
@@ -160,6 +186,13 @@
           <li><kbd>Shift</kbd> sprint — burns the Run bar, and roughly doubles your jump</li>
           <li>Mouse to steer the camera</li>
           <li>Ten traps along the course arm and fire <b>on their own</b> — the glowing markers tell you which are live</li>
+          <li id="enemyBlurb" style="display: none">
+            As the <b>enemy</b> you are behind the glass instead: the pack is all bots and the
+            traps fire for nobody but you. A gallery runs the whole length of the course, and every
+            machine has one button, on the wall level with it. You have to walk to a button to use
+            it — stand at it and press <kbd>E</kbd>. The course is hundreds of metres long and they
+            cover it at speed, so you cannot hold all of it. Stop all six getting through.
+          </li>
           <li><kbd>R</kbd> restart run &nbsp;·&nbsp; <kbd>Esc</kbd> release mouse</li>
         </ul>
         <button id="startBtn" disabled><span id="btnLabel">Loading…</span></button>

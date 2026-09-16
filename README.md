@@ -27,6 +27,38 @@ npm run preview    # serve the built bundle
 Requires Node 18+. The physics engine ships as WebAssembly inlined into the bundle,
 so there is nothing to host but static files.
 
+### Two roles
+
+The title card picks which side of the glass you are on, and the choice is a link
+rather than a toggle: the role is read once at startup and decides who owns the
+traps, who gets a camera and whether any dog is yours, so a mid-run switch would be
+a lie. `?enemy` is the same thing typed out.
+
+**Play as dog** is the race — third person, six runners, and traps that arm and
+fire on their own.
+
+**Play as enemy** puts you behind the glass, on foot, in first person. Every dog is
+a bot and the course stops springing its own traps, because you are holding them
+now — `TrapSystem.manned` switches the self-fire off, which is what `autoInterval`
+always meant.
+
+A **gallery** runs the entire length of the course, glass on the racing-line side,
+and every machine has exactly one button, mounted on the wall level with it. A
+button further than `ENEMY.reach` away cannot be pressed, so firing a trap means
+walking to it, and the pack covers ground at 7.4 m/s. That is the mode: ten
+machines spread over hundreds of metres, one of you, and the decision is which
+stretch of course you are going to hold. You walk a little faster than they run
+(`ENEMY.moveSpeed`) because the corridor is straight and the course is not.
+
+The gallery floor is sampled from the course's own surface and **ramps** to follow
+it. A stepped one would put a wall between you and the traps on a climb and strand
+their buttons up a face you cannot walk.
+
+A dog that falls is dead — `ENEMY.lives` is 1 — and you win the run only if none of
+them reach the gate. Three lives was the first attempt and the arithmetic killed it:
+six bots at three lives is eighteen kills, against ten traps that each fire about
+once as the pack passes, so every firing would have had to take two dogs with it.
+
 ### Controls
 
 | Input | Action |
@@ -37,6 +69,11 @@ so there is nothing to host but static files.
 | `Space` (held while falling) | **Tail glide** — the signature move. Holding it never re-jumps |
 | `Shift` | **Sprint** — burns the Run bar, and roughly doubles your jump range |
 | `R` | Restart the run |
+
+As the enemy, `W` `A` `S` `D` walk you along the gallery, the mouse looks, and `E`
+fires the button you are standing at. Nothing else applies — there is no dog to
+jump, glide or sprint. The top-left readout names the button under your crosshair,
+or points you at the nearest one and how far down the corridor it is.
 
 Append `?debug` to the URL for a trap bar along the bottom and number keys `1`–`0`
 to fire each trap by hand. `window.ibaShinu.debug()` dumps runner, camera and trap
@@ -361,11 +398,14 @@ world geometry on separate layers: a runner collides with the course and nothing
 else, and every ray — ground checks, AI gap probes, the camera boom — filters to
 world only. A pack of dogs on one narrow ledge is a race, not a shoving match.
 
-**Post-processing is in, and on.** `` ` `` → POST is an `EffectComposer` running
-bloom and GTAO, and it is the shipped look. Turning `enabled` off is a real path
-rather than a bypass — the scene draws straight to the canvas as it always did —
-and it is the first thing to try on a machine that cannot hold a frame. Two
-things to know about the difference between the two paths.
+**Post-processing is in, with the bloom on and the AO off.** `` ` `` → POST is an
+`EffectComposer` running both. The glow is what the palette was built around, so it
+ships on; GTAO is the expensive half and ships off, because frames are worth more —
+it is far cheaper than the note below it used to claim, but cheaper is not free.
+Turning `enabled` off entirely is a real path rather than a bypass: the scene draws
+straight to the canvas as it always did, which costs nothing and keeps the free
+MSAA. Nothing in the game depends on any of it, the sun included — that is drawn in
+the sky shader. Two things to know about the difference between the two paths.
 `antialias: true` buys MSAA on the default framebuffer, which a composer never
 reaches, so the target asks for `POST.samples` of its own. And tone mapping moves
 to a final pass, where three mixes scene fog before it rather than after, so the
@@ -645,6 +685,13 @@ The things most worth touching first:
 - `SUN.color` / `intensity` / `ambientSky` / `ambientGround` / `exposure` — the whole
   lighting mood, and the one to reach for if post-processing shifts it
 - `RUNNER.holdToJump` — `false`; set it `true` if you want bunny hopping back
+- `ENEMY.lives` — wipeouts a bot survives before it is out of the run
+- `ENEMY.moveSpeed` — the balance of the whole mode: how much of the course you can hold
+- `ENEMY.reach` — how close you must stand to a button, and so how much walking costs
+- `ENEMY.gallery.x` — how far the corridor sits from the racing line; it has to clear
+  the widest course (the gauntlet's arena reaches 9.5 m)
+- `ENEMY.gallery.rampRun` — metres a change in height is spread over, which is what
+  makes the gallery ramp instead of step
 - `RUNNER.glide` — the whole feel of the signature move
 - `CAMERA.sensitivity` — CS 1.6's default of `2.5`
 - `CAMERA.followRate` — `0` is a rigid mount; raise it to soften the camera
@@ -714,16 +761,22 @@ The architecture this is built toward.
   timestamp T is resolved against where runners actually were at T on the firing
   client's screen.
 
-### 5 — The saboteur
-The reason this game exists. One player, or a rotating one, leaves the track and
-takes the levers: an overhead view of the course, an energy pool, and a cooldown on
-each machine. Firing a trap becomes a read on where the pack will be in two seconds
-rather than a timer.
+### 5 — The saboteur · playable, single-player
+The reason this game exists, and `?enemy` is it against bots: the booth, the
+console, one button per machine, and cooldowns as the only resource. Firing a trap
+is already a read on where the pack will be in two seconds rather than a timer.
 
-The hooks are already in place. `TrapSystem.fire(index)` is the entry point, wired
-to the number keys behind `?debug`. What it needs is the energy economy, the
-overhead camera, the pick-a-trap-with-the-mouse interaction, and a scoring rule that
-makes sabotage worth doing well.
+What it does not have yet is a second client. The role is chosen at startup and the
+enemy is local, so this is the sabotage loop played against `AiBrain` rather than
+against people — which is the point of building it this way round: the interaction
+and the balance can be found now, and the netcode inherits a loop that already
+works. `TrapSystem.fire(index)` is still the single entry point a remote saboteur
+would call.
+
+Still open: an energy pool on top of the per-trap cooldowns, if cooldowns alone turn
+out to be too generous; a scoring rule richer than "how many got through"; and the
+gallery is generated from a floor sample rather than authored, which is what makes it
+work on every existing course but also means no level gets to design its sightlines.
 
 ### 6 — Content and meta
 More trap kinds (conveyors, swinging floors, a chase hazard). A course defined as

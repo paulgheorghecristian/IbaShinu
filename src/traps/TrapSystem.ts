@@ -36,6 +36,14 @@ const KEYS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit
  */
 export class TrapSystem {
   readonly traps: Trap[] = []
+  /**
+   * Somebody is at the console, so the course stops springing its own traps.
+   *
+   * This is what `autoInterval` has always been documented against: the self-fire
+   * is what stands in for a saboteur when there is nobody in the chair. With an
+   * enemy playing, leaving it on would fire traps they were saving.
+   */
+  manned = false
 
   constructor(
     physics: Physics,
@@ -109,11 +117,13 @@ export class TrapSystem {
   update(dt: number, elapsed: number, runners: Runner[]): void {
     const ctx: TrapContext = { dt, elapsed, runners, particles: this.particles }
     for (const trap of this.traps) {
-      trap.autoTimer -= dt
-      if (trap.autoTimer <= 0) {
-        trap.autoTimer = trap.rollDelay()
-        // Only spring a trap somebody is close enough to be caught by.
-        if (this.someoneNear(trap.spec.anchor.z, runners)) trap.fire()
+      if (!this.manned) {
+        trap.autoTimer -= dt
+        if (trap.autoTimer <= 0) {
+          trap.autoTimer = trap.rollDelay()
+          // Only spring a trap somebody is close enough to be caught by.
+          if (this.someoneNear(trap.spec.anchor.z, runners)) trap.fire()
+        }
       }
       trap.update(ctx)
     }

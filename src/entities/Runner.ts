@@ -12,7 +12,13 @@ import { RUNNER, DOG } from '../config'
 import { coatTexture, SHADOW_SIDE } from '../world/Materials'
 import type { DogInstance } from '../world/DogModel'
 
-export type RunnerState = 'racing' | 'respawning' | 'finished'
+/**
+ * `out` is enemy mode only: a runner that has spent its lives is done, and is
+ * parked rather than respawned. Everything that drives a runner treats it the
+ * way it treats a finisher — no input, no checkpoints — but it never gets a
+ * finish time, because it never finished.
+ */
+export type RunnerState = 'racing' | 'respawning' | 'finished' | 'out'
 
 const UP = new THREE.Vector3(0, 1, 0)
 /** Scratch for the slope alignment, which runs per runner per frame. */
@@ -208,6 +214,13 @@ export class Runner {
     const r = this.body.rotation()
     this.prevPos.set(t.x, t.y, t.z)
     this.prevQuat.set(r.x, r.y, r.z, r.w)
+
+    if (this.state === 'out') {
+      this.gliding = false
+      this.sprinting = false
+      this.body.setGravityScale(1, true)
+      return
+    }
 
     if (this.state === 'respawning') {
       // Clear the action flags, or they go stale across the respawn. A sprint
@@ -450,9 +463,29 @@ export class Runner {
     return this.windup > 0 ? 1 - this.windup / RUNNER.jumpWindup : 0
   }
 
+  /**
+   * Out of the race for good.
+   *
+   * Dropped well under the course rather than hidden in place: the kill plane is
+   * the only thing that would otherwise notice the body, and a runner parked on
+   * the track is something the pack steers around and the traps still count as
+   * worth firing at.
+   */
+  eliminate(): void {
+    if (this.state === 'finished' || this.state === 'out') return
+    this.state = 'out'
+    this.gliding = false
+    this.sprinting = false
+    this.windup = 0
+    this.body.setTranslation({ x: 0, y: RUNNER.killY - 40, z: this.position.z }, true)
+    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true)
+    this.body.setAngvel({ x: 0, y: 0, z: 0 }, true)
+    this.snapRender()
+  }
+
   /** Send the runner back to its last checkpoint. */
   wipeout(course: Course): void {
-    if (this.state === 'finished') return
+    if (this.state === 'finished' || this.state === 'out') return
     this.falls += 1
     this.state = 'respawning'
     this.gliding = false
@@ -586,6 +619,8 @@ export class Runner {
       s.y += (1 + target * 0.5 - s.y) * k
       s.z += (1 + target * 1.4 - s.z) * k
     }
-    this.root.visible = this.state !== 'respawning' || Math.floor(performance.now() / 90) % 2 === 0
+    this.root.visible =
+      this.state !== 'out' &&
+      (this.state !== 'respawning' || Math.floor(performance.now() / 90) % 2 === 0)
   }
 }

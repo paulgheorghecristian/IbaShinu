@@ -39,6 +39,19 @@ export class CameraRig {
     return this.dir.set(Math.sin(this.yaw) * cp, -Math.sin(this.pitch), Math.cos(this.yaw) * cp)
   }
 
+  /**
+   * First person: the eye *is* the camera.
+   *
+   * The angles are the same ones the third-person boom orbits on, so a mode
+   * switch never moves the view — only the radius, which is zero here. Nothing
+   * is eased and nothing collides: the enemy is confined to a room it cannot
+   * leave, so there is no geometry for a boom to catch on.
+   */
+  updateFirstPerson(camera: THREE.PerspectiveCamera, eye: THREE.Vector3): void {
+    camera.position.copy(eye)
+    camera.rotation.set(-this.pitch, this.yaw + Math.PI, 0, 'YXZ')
+  }
+
   update(
     camera: THREE.PerspectiveCamera,
     target: THREE.Vector3,
