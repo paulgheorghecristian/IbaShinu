@@ -608,8 +608,20 @@ export const SUN = {
    * corridor it is about to sweep, and a crusher's shadow slides in toward the
    * exact tile it is going to hit. Angle the sun down the course and every
    * shadow is displaced along the one axis you need to read.
+   *
+   * Which *side* of the course it sits on is a separate question, and the answer
+   * is the enemy's. The gallery runs down +X with its window facing back at the
+   * racing line, so a sun at +X is behind a solid wall and a roof for the whole
+   * mode — the one role that spends the race standing still and looking at the
+   * sky never saw it. At -X it comes in through the window. Nothing else cares:
+   * the frustum extents are symmetric, so flipping the sign costs the shadow
+   * mapping nothing, and perpendicular is perpendicular either way.
+   *
+   * The elevation is bounded by that window. At 31 degrees the gallery roof cuts
+   * the sun off from the back third of the corridor; raise it much further and it
+   * is only visible with your nose against the glass.
    */
-  offset: { x: 38, y: 23, z: 0 },
+  offset: { x: -38, y: 23, z: 0 },
 
   /**
    * Key light. A sun this low in the sky is a warm one, so the colour follows
