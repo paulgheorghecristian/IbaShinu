@@ -433,6 +433,15 @@ export class Runner {
     this.carried.set(0, 0, 0)
     this.grounded = false
     this.jumpLock = RUNNER.jumpLockout
+    // The ground contact has been spent. `jumpLockout` stops the probe re-arming
+    // the jump, but coyote time is a second, independent way back in and the
+    // lockout does not cover it: the runner is still standing through the whole
+    // windup, so the tick that launches has just refreshed coyote to its full
+    // `coyoteTime` — which is longer than the lockout anyway. Leave it set and
+    // for the next tenth of a second the runner is airborne with a live ground
+    // credit, so any buffered press fires a second jump out of mid-air and the
+    // dog sails up twice as high.
+    this.coyote = 0
     this.jumps += 1
   }
 
