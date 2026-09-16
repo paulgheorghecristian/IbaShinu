@@ -25,9 +25,24 @@ const SKY_FRAG = /* glsl */ `
   uniform vec3 top;
   uniform vec3 bottom;
   uniform vec3 haze;
+  uniform vec3 sunDirection;
+  uniform vec3 sunColor;
+  /** x: cos(inner angle), y: cos(outer angle), z: disc brightness. */
+  uniform vec3 sunShape;
+  /** x: halo strength, y: halo falloff exponent. */
+  uniform vec2 sunGlow;
   void main() {
-    float h = normalize(vDir).y * 0.5 + 0.5;
+    vec3 dir = normalize(vDir);
+    float h = dir.y * 0.5 + 0.5;
     vec3 c = mix(bottom, top, smoothstep(0.28, 0.78, h));
+
+    // The sun. Added to the gradient rather than drawn over it, so the haze mix
+    // below takes it too — a sun low enough to sit in the horizon band fades into
+    // the same haze the distant course does, instead of hanging in front of it.
+    float cd = dot(dir, sunDirection);
+    float disc = smoothstep(sunShape.y, sunShape.x, cd);
+    float halo = pow(max(cd, 0.0), sunGlow.y);
+    c += sunColor * (disc * sunShape.z + halo * sunGlow.x);
     // Everything at and below the horizon is exactly the fog colour, and the
     // gradient is only allowed above it. A raw ShaderMaterial gets no fog of its
     // own, and the course sits at or below the horizon from any playing camera —
@@ -88,6 +103,10 @@ export class Renderer {
           top: { value: new THREE.Color(COLORS.sky) },
           bottom: { value: new THREE.Color(COLORS.horizon) },
           haze: { value: new THREE.Color(COLORS.fog) },
+          sunDirection: { value: new THREE.Vector3(0, 1, 0) },
+          sunColor: { value: new THREE.Color(SUN.color) },
+          sunShape: { value: new THREE.Vector3(1, 1, 0) },
+          sunGlow: { value: new THREE.Vector2(0, 1) },
         },
       }),
     )
@@ -343,6 +362,20 @@ export class Renderer {
     haze.haze.value.setHex(COLORS.fog)
     haze.top.value.setHex(COLORS.sky)
     haze.bottom.value.setHex(COLORS.horizon)
+
+    // The disc sits in the direction the light arrives from. `offset` is where the
+    // lamp is put relative to whatever it is aimed at, and that offset is constant
+    // — the lamp is moved to follow the action but never turned — so normalising it
+    // is the sun's fixed place in the sky.
+    haze.sunDirection.value.set(SUN.offset.x, SUN.offset.y, SUN.offset.z).normalize()
+    haze.sunColor.value.setHex(SUN.color)
+    const rad = Math.PI / 180
+    haze.sunShape.value.set(
+      Math.cos(SUN.disc.size * rad),
+      Math.cos((SUN.disc.size + SUN.disc.softness) * rad),
+      SUN.disc.intensity,
+    )
+    haze.sunGlow.value.set(SUN.disc.glow, SUN.disc.glowFalloff)
 
     const cam = this.sun.shadow.camera
     cam.near = SUN.near

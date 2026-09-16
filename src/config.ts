@@ -645,6 +645,36 @@ export const SUN = {
   /** The course is essentially flat, so pinning this stops vertical shadow swim. */
   focusHeight: 2,
 
+  /**
+   * The sun, as a thing you can see rather than only a direction light comes from.
+   *
+   * Drawn into the sky shader, in the direction of `offset`, so it sits where the
+   * light and the shadows say it should and stays there when you turn. That is
+   * worth saying because the game had no sun in it for a long time and looked as
+   * though it did: the enemy gallery's glass was briefly a mirror at roughness
+   * 0.05, and the specular peak it threw off the directional light bloomed into a
+   * convincing white ball. It moved with the head and hung in mid-air, because it
+   * was a reflection rather than a sun. This is the real one.
+   *
+   * It is in the sky sphere, which draws before everything and never writes depth,
+   * so the course occludes it for free — no depth work, and nothing to go wrong
+   * when a platform passes in front of it.
+   */
+  disc: {
+    /** Angular radius in degrees. The real sun is 0.27; this is a game. */
+    size: 1.3,
+    /** Degrees of soft edge, so the rim does not crawl from pixel to pixel. */
+    softness: 0.8,
+    /**
+     * Brightness of the disc itself. Above 1 on purpose: the bloom pass only
+     * takes pixels over `POST.bloom.threshold`, and a sun that does not bloom
+     * reads as a white sticker rather than a light.
+     */
+    intensity: 7,
+    /** The haze around it: how strong, and how tightly it hugs the disc. */
+    glow: 0.5,
+    glowFalloff: 240,
+  },
 }
 
 /**
