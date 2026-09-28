@@ -68,7 +68,27 @@ once as the pack passes, so every firing would have had to take two dogs with it
 | `Space` | Jump |
 | `Space` (held while falling) | **Tail glide** — the signature move. Holding it never re-jumps |
 | `Shift` | **Sprint** — burns the Run bar, and roughly doubles your jump range |
+| `F` (mid-jump) | **Flip back** — the jump is real until the press, then a backflip lands a step behind the take-off. The feint |
 | `R` | Restart the run |
+
+On a touch screen the same run is played with two fingers, and the camera stays
+pointed down the course:
+
+| Touch | Action |
+| --- | --- |
+| Hold a finger anywhere | Run. A stick appears under the finger; slide it left or right to steer, `TOUCH.steerRange` px is full lock. The stick is drawn where the finger is, not the other way round |
+| Push it up | **Sprint**, past `TOUCH.sprintUp` px. The same sprint as Shift: burns the Run bar, roughly doubles the jump |
+| Press with a second finger | Jump. Keep it held and the dog tail-glides on the way down |
+| Slide it down while held | **Flip back**. The jump is real until the slide (`TOUCH.swipeDown` px); then the dog backflips and lands a step behind where it took off (`RUNNER.feint.backStep`). The finger has to rest `TOUCH.swipeDelayMs` after pressing before the slide counts, so one continuous press-and-swipe is only a jump. It works from any real air — a trap that throws you counts — but never from the ground. A second press is never a feint, so reaching for a glide cannot trigger one |
+| Tap the run finger | Also a jump: down and up within `TOUCH.tapMs` without steering. Glide needs the second finger, because it is a hold |
+| Restart button, top centre | Restart the run |
+
+The flip back exists for the other side of the glass: the take-off is what a
+saboteur reads as "jumping now", and until the feint is asked for the jump *is*
+a real one — same crouch, same arc — so how long the bait is held is the
+player's call. Then the dog turns over and comes down on its own tile, and the
+trap fired for the one it was going to land on hits nothing. In this build nobody is watching, so it is a
+mechanic waiting for its opponent.
 
 As the enemy, `W` `A` `S` `D` walk you along the gallery, the mouse looks, and `E`
 fires the button you are standing at. Nothing else applies — there is no dog to

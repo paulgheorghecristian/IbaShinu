@@ -34,6 +34,13 @@ const DEBUG = new URLSearchParams(window.location.search).has('debug')
  */
 const ENEMY_MODE = new URLSearchParams(window.location.search).has('enemy')
 
+/**
+ * A screen you play by touching. Decides the help text, the on-screen restart
+ * and whether the pointer is ever locked — the controls themselves are always
+ * live, so a laptop with a touchscreen gets both without asking.
+ */
+const TOUCH_UI = window.matchMedia('(pointer: coarse)').matches
+
 class Game {
   private readonly renderer: Renderer
   private readonly input: Input
@@ -116,6 +123,9 @@ class Game {
     this.hud.configure({ board: total > 1, trapBar: DEBUG || ENEMY_MODE, enemy: ENEMY_MODE })
     if (DEBUG || ENEMY_MODE) this.hud.buildTrapBar(this.traps.traps)
     if (ENEMY_MODE) this.hud.useEnemyHelp()
+    else if (TOUCH_UI) this.hud.useTouchHelp()
+    // The button is a key press by another route, so restart has one path.
+    this.hud.onRestart(() => this.input.tap('KeyR'))
     this.placeCamera(true)
   }
 
@@ -135,6 +145,8 @@ class Game {
     this.lastFrameTime = now
 
     this.handleControls()
+    // What a finger landing now means depends on this; see Input.airborne.
+    this.input.airborne = this.player !== null && !this.player.grounded
     this.alpha = this.physics.step(dt, (fixedDt) => this.fixedStep(fixedDt))
     this.draw(dt)
     this.input.endFrame()
@@ -148,7 +160,11 @@ class Game {
     if (this.input.pointerLocked || this.input.dragging) {
       this.rig.applyMouse(this.input.mouseDx, this.input.mouseDy)
     }
-    if (!this.input.pointerLocked && this.input.clicked) this.input.requestPointerLock()
+    // Never on glass: there is no pointer to lock, and the request is refused
+    // with a console error on every tap.
+    if (!this.input.pointerLocked && this.input.clicked && !TOUCH_UI && !this.input.touched) {
+      this.input.requestPointerLock()
+    }
 
     // The console. A button has to be looked at to be pressed, so a miss is a
     // miss — and pressing one that is still cooling says so rather than being
@@ -230,7 +246,7 @@ class Game {
         const brain = this.brains[i]
         frame = brain
           ? brain.think(runner, this.course, this.physics, dt, this.elapsed)
-          : this.input.sample(this.rig.yaw)
+          : this.input.sample(this.rig.yaw, dt)
       }
 
       runner.fixedUpdate(dt, frame, this.course, this.raceTime)
@@ -350,7 +366,7 @@ class Game {
       // The enemy is not simulated, so it is driven per rendered frame: there is
       // nothing for a fixed step to keep deterministic, and at 60 ticks a
       // first-person view judders on a 144 Hz screen.
-      this.enemy.update(dt, this.input.sample(this.rig.yaw), this.gallery)
+      this.enemy.update(dt, this.input.sample(this.rig.yaw, dt), this.gallery)
       this.aimed = this.gallery.aimedAt(this.enemy.eye, this.rig.viewDirection)
       this.gallery.refresh(this.traps.traps, this.aimed)
       this.rig.updateFirstPerson(this.renderer.camera, this.enemy.eye)
@@ -368,6 +384,7 @@ class Game {
     this.particles.setViewpoint(this.renderer.camera.position)
     this.particles.update(dt, this.renderer.camera)
     this.hud.tickToast(dt)
+    this.hud.setStick(this.input.stick)
 
     this.hudTimer -= dt
     if (this.hudTimer <= 0) {
@@ -509,6 +526,8 @@ class Game {
           falls: r.falls,
           checkpoint: r.checkpointIndex,
           gliding: r.gliding,
+          returning: r.returning,
+          heading: +r.heading.toFixed(2),
           dogJumpTime: +r.dogJumpTime.toFixed(3),
           sprinting: r.sprinting,
           weights: r.dogWeights,
@@ -571,9 +590,16 @@ async function boot(): Promise<void> {
 
   label.textContent = 'Start Run'
   button.disabled = false
+  document.body.classList.toggle('touch', TOUCH_UI)
   button.addEventListener('click', () => {
     overlay.classList.add('hidden')
-    void canvas.requestPointerLock()
+    if (TOUCH_UI) {
+      // The address bar is a third of a phone held sideways. Only a user gesture
+      // can ask, and this is the one; a browser that refuses is left as it is.
+      document.documentElement.requestFullscreen?.().catch(() => undefined)
+    } else {
+      void canvas.requestPointerLock()
+    }
     game.start()
   })
 }

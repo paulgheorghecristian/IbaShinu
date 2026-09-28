@@ -8,7 +8,7 @@ import {
 } from '../engine/Physics'
 import type { InputFrame } from '../engine/Input'
 import type { Course } from '../world/Course'
-import { RUNNER, DOG } from '../config'
+import { RUNNER, DOG, PHYSICS } from '../config'
 import { coatTexture, SHADOW_SIDE } from '../world/Materials'
 import type { DogInstance } from '../world/DogModel'
 
@@ -25,6 +25,8 @@ const UP = new THREE.Vector3(0, 1, 0)
 const TILT = new THREE.Quaternion()
 const SPIN = new THREE.Quaternion()
 const FLAT = new THREE.Quaternion()
+const FLIP = new THREE.Quaternion()
+const RIGHT = new THREE.Vector3(1, 0, 0)
 
 /**
  * A racer. The player and every bot share this class — only the source of the
@@ -45,6 +47,8 @@ export class Runner {
   grounded = false
   gliding = false
   sprinting = false
+  /** Flipping back to the take-off point, until the paws touch. */
+  returning = false
 
   private readonly shell: THREE.Mesh
   /** Yaws to the travel direction. The dog, when present, rides on this. */
@@ -57,6 +61,11 @@ export class Runner {
   /** Dev introspection only. */
   get dogWeights(): Record<string, number> | null {
     return this.dog ? this.dog.weights : null
+  }
+
+  /** Dev introspection only: the heading the mesh is turning toward, radians. */
+  get heading(): number {
+    return this.facing
   }
 
   /** Dev introspection only. */
@@ -79,6 +88,15 @@ export class Runner {
   private jumpLock = 0
   /** Seconds left of the crouch before the impulse actually fires. */
   private windup = 0
+  /** Where the ground was last under the ball's centre, so where a flip back lands. */
+  private readonly launchPoint = new THREE.Vector3()
+  /** Where the flip back is aimed: a step behind the take-off. */
+  private readonly returnTarget = new THREE.Vector3()
+  /** 0..1 through the backflip, and how many seconds the whole turn takes. */
+  private flip = 0
+  private flipTime = 1
+  /** Seconds left of holding the heading after a flip back lands. */
+  private facingHold = 0
   private respawnTimer = 0
   private facing = 0
 
@@ -265,6 +283,14 @@ export class Runner {
             this.body,
           )
     this.grounded = ground !== null
+    this.facingHold = Math.max(0, this.facingHold - dt)
+    if (this.grounded) {
+      if (this.returning) this.facingHold = RUNNER.feint.settleFacing
+      this.returning = false
+      // Remember where the ground is, so a flip back always has somewhere to
+      // go — from a jump or a trap alike.
+      this.launchPoint.set(t.x, t.y, t.z)
+    }
 
     // Remember the face underfoot so the dog can be stood square to it. Eased
     // rather than copied: stepping from a ramp onto flat ground is a hard change
@@ -322,6 +348,10 @@ export class Runner {
     this.move.set(0, 0, 0)
       .addScaledVector(this.forward, frame.forward)
       .addScaledVector(this.right, frame.right)
+    // No steering through a flip back. The arc is being flown for it, and the
+    // heading is what the flip turns about — a thumb drifting on the run
+    // finger would swing the dog sideways as it went over.
+    if (this.returning) this.move.set(0, 0, 0)
 
     const drive = this.move.length()
 
@@ -409,9 +439,28 @@ export class Runner {
       else this.launch()
     }
 
+    // The feint: the dog turns over backwards and comes down a step behind
+    // the last ground it stood on. Only a dog properly in the air can be
+    // turned around — a jump, or a trap that threw it — and "properly" means
+    // past the coyote grace, so a probe missing the floor for a tick on a
+    // ramp does not count. On the ground it is ignored, crouch included: a
+    // slide that arrives before the jump has left is dropped, not kept.
+    if (frame.fakePressed && !this.grounded && this.coyote <= 0 && !this.returning) {
+      this.startReturn()
+    }
+
+    // --- return -----------------------------------------------------------
+    if (this.returning) this.steerReturn()
+
     // --- tail glide -------------------------------------------------------
+    // Not on the way back from a flip: the return is an arc that has been
+    // solved for, and a glide would hold it up short of the tile.
     const wantsGlide =
-      !this.grounded && frame.jump && v.y < RUNNER.glide.minFallSpeed && this.stamina > 0
+      !this.grounded &&
+      !this.returning &&
+      frame.jump &&
+      v.y < RUNNER.glide.minFallSpeed &&
+      this.stamina > 0
     this.gliding = wantsGlide
 
     if (wantsGlide) {
@@ -429,7 +478,8 @@ export class Runner {
       )
       this.stamina = Math.max(0, this.stamina - RUNNER.glide.drainPerSecond * dt)
     } else {
-      this.body.setGravityScale(1, true)
+      // Heavier on the way back from a flip, so the return is quicker than the jump.
+      this.body.setGravityScale(this.returning ? RUNNER.feint.returnGravity : 1, true)
       const rate = this.grounded ? RUNNER.glide.refillPerSecond * 1.8 : RUNNER.glide.refillPerSecond * 0.5
       this.stamina = Math.min(100, this.stamina + rate * dt)
     }
@@ -438,6 +488,7 @@ export class Runner {
   /** Leave the ground. Velocity is read fresh, so this tick's drive is included. */
   private launch(): void {
     const v = this.body.linvel()
+    this.launchPoint.copy(this.position)
     // Leaving a moving platform should launch you from its frame, not the world's.
     this.body.setLinvel(
       { x: v.x + this.carried.x, y: RUNNER.jumpSpeed, z: v.z + this.carried.z },
@@ -456,6 +507,76 @@ export class Runner {
     // dog sails up twice as high.
     this.coyote = 0
     this.jumps += 1
+  }
+
+  /**
+   * Turn over backwards and come down a step behind where the jump left from.
+   *
+   * Beyond the pop, nothing vertical changes here or in `steerReturn`: the dog
+   * rises and falls under gravity, only heavier. The flip is timed to the fall
+   * that remains, so the dog comes round as it lands.
+   */
+  private startReturn(): void {
+    this.returning = true
+    this.jumpBuffer = 0
+    this.gliding = false
+    // Straight back down the course — the camera's forward, which on glass
+    // is the course itself — from wherever the dog is now: however far it has
+    // got past the take-off, plus the step. Sideways it stays where it is —
+    // aiming at the take-off's exact spot would drag any drift steered in the
+    // air back across, and the flip read as a swerve. Whatever diagonal the
+    // dog was running on is forgotten: the flip resets it to straight ahead.
+    const t = this.body.translation()
+    const along =
+      (t.x - this.launchPoint.x) * this.forward.x + (t.z - this.launchPoint.z) * this.forward.z
+    this.returnTarget
+      .set(t.x, this.launchPoint.y, t.z)
+      .addScaledVector(this.forward, -(along + RUNNER.feint.backStep))
+    // Face straight down the course for the whole turn and the landing, so
+    // the flip is in the plane of the motion and nothing yaws under it.
+    this.facing = Math.atan2(this.forward.x, this.forward.z)
+    // The pop: never turn over while sinking. Asked for on the way down, the
+    // dog hops up first, which is the beat the flip needs to read.
+    const v = this.body.linvel()
+    if (v.y < RUNNER.feint.kick) this.body.setLinvel({ x: v.x, y: RUNNER.feint.kick, z: v.z }, true)
+    this.flip = 0
+    this.flipTime = Math.max(0.25, this.timeToTarget() ?? 0.4)
+    this.steerReturn()
+  }
+
+  /**
+   * Seconds until the body, falling under the return gravity from its current
+   * vertical speed, is back at the target's height; null if it never will be.
+   */
+  private timeToTarget(): number | null {
+    const t = this.body.translation()
+    const v = this.body.linvel()
+    const g = -PHYSICS.gravity * RUNNER.feint.returnGravity
+    const disc = v.y * v.y + 2 * g * (t.y - this.returnTarget.y)
+    if (disc < 0) return null
+    return (v.y + Math.sqrt(disc)) / g
+  }
+
+  /**
+   * Aim the horizontal motion so the fall lands on the target.
+   *
+   * Solved fresh every tick rather than once: the sideways speed that arrives
+   * in the time the fall has left is (target - here) / T, and setting it again
+   * as T shrinks corrects for the damping and the air drive that would
+   * otherwise leave the dog a little short. The solve is left alone for the
+   * last few ticks, where a tiny T would turn any residual into a huge
+   * velocity, and gravity brings the dog the last centimetre. A body that can
+   * no longer reach the target's height — the tile went — is left to fall.
+   */
+  private steerReturn(): void {
+    const T = this.timeToTarget()
+    if (T === null || T < RUNNER.feint.settleTime) return
+    const t = this.body.translation()
+    const v = this.body.linvel()
+    this.body.setLinvel(
+      { x: (this.returnTarget.x - t.x) / T, y: v.y, z: (this.returnTarget.z - t.z) / T },
+      true,
+    )
   }
 
   /** 0 while standing, rising to 1 across the crouch. Drives the anticipation. */
@@ -477,6 +598,7 @@ export class Runner {
     this.gliding = false
     this.sprinting = false
     this.windup = 0
+    this.returning = false
     this.body.setTranslation({ x: 0, y: RUNNER.killY - 40, z: this.position.z }, true)
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true)
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true)
@@ -491,6 +613,7 @@ export class Runner {
     this.gliding = false
     this.sprinting = false
     this.windup = 0
+    this.returning = false
     this.respawnTimer = RUNNER.respawnDelay
     this.stalled = 0
     const cp = course.checkpoints[this.checkpointIndex]
@@ -531,6 +654,9 @@ export class Runner {
     this.jumpBuffer = 0
     this.jumpLock = 0
     this.windup = 0
+    this.returning = false
+    this.facingHold = 0
+    this.flip = 0
     this.respawnTimer = 0
     this.stalled = 0
     this.stallAnchor.copy(spawn)
@@ -582,7 +708,15 @@ export class Runner {
     this.shell.quaternion.copy(this.prevQuat).slerp(this.liveQuat, alpha)
 
     const v = this.body.linvel()
-    if (v.x * v.x + v.z * v.z > 0.6) this.facing = Math.atan2(v.x, v.z)
+    // Turn toward the motion, but only motion that is broadly the way the dog
+    // already faces. Going straight backwards — the flip back, and its landing
+    // still moving that way, or a wrecker to the chest — is not something to
+    // turn round for; the dog keeps looking where it was going. Deliberate
+    // turns come from the input, in fixedUpdate, and are not gated.
+    if (!this.returning && this.facingHold <= 0 && v.x * v.x + v.z * v.z > 0.6) {
+      const ahead = v.x * Math.sin(this.facing) + v.z * Math.cos(this.facing)
+      if (ahead > 0) this.facing = Math.atan2(v.x, v.z)
+    }
     // Ease the dressing toward travel direction so it does not snap on contact.
     let delta = this.facing - this.meshYaw
     while (delta > Math.PI) delta -= Math.PI * 2
@@ -599,7 +733,17 @@ export class Runner {
     const lean = 2 * Math.acos(Math.min(1, Math.abs(TILT.w)))
     if (lean > DOG.slopeMaxTilt) TILT.copy(FLAT.identity().slerp(TILT, DOG.slopeMaxTilt / lean))
     SPIN.setFromAxisAngle(UP, this.meshYaw)
-    this.dressing.quaternion.copy(TILT).multiply(SPIN)
+    // The backflip: one full turn about the dog's own right axis, nose going
+    // up first, timed to the return so it comes round as the paws touch. It
+    // is allowed to finish after an early landing rather than snap upright.
+    if (this.returning || (this.flip > 0 && this.flip < 1)) {
+      this.flip = Math.min(1, this.flip + dt / this.flipTime)
+    } else {
+      this.flip = 0
+    }
+    const eased = this.flip * this.flip * (3 - 2 * this.flip)
+    FLIP.setFromAxisAngle(RIGHT, -Math.PI * 2 * eased)
+    this.dressing.quaternion.copy(TILT).multiply(SPIN).multiply(FLIP)
 
     if (this.dog) {
       this.dog.update(dt, {

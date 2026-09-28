@@ -104,6 +104,43 @@ export const RUNNER = {
   holdToJump: false,
 
   /**
+   * The feint: jump, then press again in the air and the dog turns over
+   * backwards and lands where it took off. The take-off is the bait — a
+   * saboteur watching for "jumping now" sees a real one — and the return is
+   * the bluff, because the dog is back on its own tile while the trap fires at
+   * the one it was going to land on.
+   *
+   * It is asked for with its own input — the jump finger sliding down while
+   * held, or `F` on a keyboard — never with a second press, so that a second
+   * press can always mean glide and nobody feints by accident reaching for
+   * one.
+   *
+   * Until the ask the jump is a real one — same crouch, same launch, same
+   * arc — so how long the bait is held is the player's call. At the ask the
+   * forward motion reverses and the dog lands `backStep` metres behind where
+   * it took off, having turned one full backflip on the way. It is arcade,
+   * not physical: `kick` is the least upward speed it has at the ask, so a
+   * flip asked for on the way down pops up first and then drops, and
+   * `returnGravity` is the gravity multiplier from the ask until the paws
+   * touch, so the drop is a snap rather than a float. `settleTime` is the
+   * tail of the return where the arc is no longer corrected, so a residual
+   * cannot become a huge last-tick velocity.
+   */
+  feint: {
+    backStep: 1.5,
+    kick: 3,
+    returnGravity: 2.2,
+    settleTime: 0.05,
+    /**
+     * Seconds after the landing that the mesh keeps its heading regardless of
+     * how the body is moving. It lands still going backwards, and the drive
+     * takes a moment to turn that round; turning the dog to face the skid
+     * read as it landing backwards.
+     */
+    settleFacing: 0.4,
+  },
+
+  /**
    * Tail glide — the signature move, and at these speeds the precision tool: it
    * buys you time in the air to line up a landing you would otherwise miss.
    */
@@ -144,6 +181,64 @@ export const TRAPS = {
   jitterMax: 1.9,
   /** A trap only springs if a runner is within this many metres of it. */
   triggerRange: 44,
+}
+
+/**
+ * Touch: one finger held anywhere runs, sliding it sideways steers, and a
+ * second finger presses to jump and holds to glide. That finger sliding down
+ * while held is the feint. Read every event, so the tuner can move them live.
+ */
+export const TOUCH = {
+  /**
+   * A run finger lifted within this many ms of landing, without having steered,
+   * was a tap and not a hold: it jumps, the same as a second finger's tap would.
+   * That is the one-thumb grip — hold to run, let go and tap to jump.
+   */
+  tapMs: 200,
+  /** CSS px the run finger has to move sideways before it counts as steering. */
+  deadZone: 4,
+  /**
+   * CSS px the jump finger has to slide *down*, still held, to turn the jump
+   * into the flip back. Far enough that a thumb settling after a press does
+   * not do it by itself, near enough that it is one short flick.
+   */
+  swipeDown: 40,
+  /**
+   * A finger that lands on the ground has pressed a jump, and its slide only
+   * counts once it has rested this many ms first — long enough for the jump
+   * to have left. One continuous press-and-swipe is a different gesture, and
+   * it is only the jump: a finger that moves more than `swipeJitter` px before
+   * the rest is up can no longer flip. A finger that lands with the dog
+   * already in the air — thrown by a trap, say — can slide at once.
+   */
+  swipeDelayMs: 250,
+  swipeJitter: 12,
+  /**
+   * CSS px from the touch-down point at which the steer input saturates. A
+   * thumb steers with small motions, so this is short: full lock is a nudge.
+   */
+  steerRange: 18,
+  /**
+   * CSS px the run finger has to be pushed *up* from where it landed to
+   * sprint, and the fraction of that it has to come back down to stop — a
+   * little hysteresis, so a thumb resting on the line does not flicker the
+   * sprint on and off.
+   */
+  sprintUp: 28,
+  sprintRelease: 0.7,
+  /**
+   * Seconds the steer takes to settle on where the thumb is — a time constant,
+   * so it is most of the way there in about three of these. Short enough not
+   * to be felt as lag, long enough that the thumb shifting a few px when the
+   * other one taps a jump is a lean rather than a kick.
+   */
+  steerSmoothing: 0.04,
+  /**
+   * How much forward drive full lock gives up for sideways. At 0 the dog is
+   * driven equally forward and across, a 45° line at most; at 0.45 full lock
+   * drives it about 60° off the course line, so a hard steer actually turns.
+   */
+  steerBias: 0.45,
 }
 
 /**
@@ -834,7 +929,7 @@ export const DOG_NAMES = [
  * material's colour, the size of a buffer — needs a reload, and the tuner says so
  * rather than pretending otherwise.
  */
-export const TUNABLES = { PHYSICS, RUNNER, TRAPS, CAMERA, RACE, ENEMY, AI, DOG, VIEW, FX, POST, SUN, UI, COLORS }
+export const TUNABLES = { PHYSICS, RUNNER, TRAPS, TOUCH, CAMERA, RACE, ENEMY, AI, DOG, VIEW, FX, POST, SUN, UI, COLORS }
 
 export type Tunables = typeof TUNABLES
 

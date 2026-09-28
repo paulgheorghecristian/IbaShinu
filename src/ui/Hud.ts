@@ -51,6 +51,10 @@ export class Hud {
   )
   private readonly help = el('help')
   private readonly toastEl = el('toast')
+  private readonly restartBtn = el<HTMLButtonElement>('restartBtn')
+  private readonly stick = el('stick')
+  private readonly stickKnob = el('stickKnob')
+  private stickShown = false
 
   private readonly trapNodes: Array<{ root: HTMLElement; fill: HTMLElement }> = []
   private boardRows: HTMLElement[] = []
@@ -61,8 +65,49 @@ export class Hud {
       '<b>Run</b><br>' +
       '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · mouse to look<br>' +
       '<kbd>Space</kbd> jump — hold while falling to <b>tail-glide</b><br>' +
-      '<kbd>Shift</kbd> sprint<br>' +
+      '<kbd>Shift</kbd> sprint · <kbd>F</kbd> mid-jump: <b>flip back</b><br>' +
       '<kbd>R</kbd> restart · <kbd>Esc</kbd> free mouse'
+  }
+
+  /**
+   * The corner help for glass. Short, because on a phone this panel sits on
+   * top of the course, and the title card has already said it in full.
+   */
+  useTouchHelp(): void {
+    this.help.innerHTML =
+      '<b>Run</b><br>' +
+      'hold to run · slide to steer · push up to <b>sprint</b><br>' +
+      'second finger: press to jump · hold to <b>glide</b><br>' +
+      'slide it down while held to <b>flip back</b> · a quick tap of the run finger jumps too'
+  }
+
+  /**
+   * The touch stick, once per rendered frame: a ring under the run finger and
+   * a knob that slides across it with the steer. Visual only — the input is
+   * already read from the finger — so it is drawn where the finger is rather
+   * than the finger having to find it. The knob's travel is for the eye, not
+   * the thumb: full lock is a nudge on the glass and would not read at scale.
+   */
+  setStick(
+    stick: { x: number; y: number; steer: number; up: number; sprinting: boolean } | null,
+  ): void {
+    if (!stick) {
+      if (this.stickShown) this.stick.style.display = 'none'
+      this.stickShown = false
+      return
+    }
+    if (!this.stickShown) this.stick.style.display = 'block'
+    this.stickShown = true
+    this.stick.style.left = `${stick.x}px`
+    this.stick.style.top = `${stick.y}px`
+    this.stickKnob.style.transform = `translate(${Math.round(stick.steer * 40)}px, ${-Math.round(stick.up * 40)}px)`
+    this.stick.classList.toggle('steering', Math.abs(stick.steer) > 0.02 || stick.up > 0.02)
+    this.stick.classList.toggle('sprinting', stick.sprinting)
+  }
+
+  /** The on-screen restart, for a device with no R key. */
+  onRestart(handler: () => void): void {
+    this.restartBtn.addEventListener('click', handler)
   }
 
   /** Swap the corner help for the gallery's, since none of the running keys apply. */

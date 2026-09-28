@@ -120,6 +120,9 @@ export class AiBrain {
       right: stuck ? this.bias * 0.6 : 0,
       jump,
       jumpPressed,
+      // Bots never bluff: a feint is a play against someone watching, and in
+      // this build nobody is.
+      fakePressed: false,
       // Open ground only. The ballistic planner brakes them back down before a
       // gap, so sprinting into one costs time rather than saving it.
       sprint: runner.grounded && !liningUp && !gapAhead && flat > 5,

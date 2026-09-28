@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <title>Iba Shinu — Deathrun POC</title>
     <link
       rel="icon"
@@ -21,7 +21,18 @@
       }
       * { box-sizing: border-box; }
       html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); }
-      canvas { display: block; }
+      /*
+       * Sized by CSS, because the renderer sets only the drawing-buffer size.
+       * Without this the element takes its buffer size in CSS pixels, so on any
+       * screen with a pixel ratio above 1 — every phone — the canvas is twice
+       * the viewport and only its top-left quarter is ever seen.
+       * A held finger on it is input, not a scroll, a zoom or a text selection.
+       */
+      canvas {
+        display: block; width: 100%; height: 100%; touch-action: none;
+        user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+      }
+      body { overscroll-behavior: none; }
 
       #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
       .panel {
@@ -87,6 +98,48 @@
       .meter.low .bar i { opacity: 0.4; }
 
       #help { bottom: 16px; left: 16px; color: var(--muted); max-width: 250px; }
+      /* Glass has no R key. Shown only on a touch screen, see body.touch below. */
+      #restartBtn {
+        display: none; position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+        pointer-events: auto; cursor: pointer; border: 1px solid var(--line); border-radius: 8px;
+        padding: 8px 16px; background: var(--panel); color: var(--accent); font-family: inherit;
+        font-weight: 700; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;
+        backdrop-filter: blur(8px); touch-action: manipulation;
+      }
+      body.touch #restartBtn { display: block; }
+      /* The touch stick: a ring under the run finger, a knob that slides with the steer. */
+      #stick {
+        display: none; position: absolute; width: 136px; height: 136px; margin: -68px 0 0 -68px;
+        border-radius: 50%; border: 2px solid rgba(255,255,255,0.30); background: rgba(12,15,22,0.34);
+        /* No backdrop blur here: it sits over the moving scene and would be
+           re-blurred every frame, which on a phone is a hitch under the thumb. */
+        will-change: left, top;
+      }
+      #stick::before, #stick::after {
+        position: absolute; top: 50%; margin-top: -13px; font-size: 22px; line-height: 26px;
+        color: rgba(255,255,255,0.45); font-weight: 700;
+      }
+      #stick::before { content: '‹'; left: 16px; }
+      #stick::after { content: '›'; right: 16px; }
+      #stickKnob {
+        position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px;
+        border-radius: 50%; background: var(--accent); opacity: 0.8;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.45); will-change: transform;
+      }
+      #stick.steering #stickKnob { opacity: 1; }
+      /* Up is sprint: a mark at the top, and the knob goes hot when it is on. */
+      #stickUp {
+        position: absolute; left: 50%; top: 10px; margin-left: -6px; width: 12px; text-align: center;
+        font-size: 22px; line-height: 26px; color: rgba(255,255,255,0.45); font-weight: 700;
+        transform: rotate(-90deg);
+      }
+      #stick.sprinting { border-color: rgba(255,159,67,0.75); }
+      #stick.sprinting #stickKnob { background: #ffd08a; box-shadow: 0 0 18px rgba(255,159,67,0.75); }
+      body.touch .kb { display: none; }
+      /* The tuner opens on a key, so its corner hint is noise on glass. */
+      body.touch .tuner-hint { display: none; }
+      #touchBlurb { display: none; }
+      body.touch #touchBlurb { display: list-item; }
       #help b { color: var(--text); }
       #help kbd {
         display: inline-block; padding: 0 5px; border: 1px solid var(--line); border-radius: 4px;
@@ -131,6 +184,39 @@
       }
       #startBtn:hover { filter: brightness(1.1); }
       #loading { color: var(--muted); font-size: 12px; letter-spacing: 0.2em; text-transform: uppercase; }
+
+      /* A phone: every panel pulled in and shrunk, and kept off the notch. */
+      @media (max-width: 760px), (max-height: 480px) {
+        .panel { font-size: 10px; padding: 6px 9px; border-radius: 8px; line-height: 1.45; }
+        #status { top: 8px; left: max(8px, env(safe-area-inset-left)); min-width: 0; }
+        #status .time { font-size: 18px; }
+        #status .row { gap: 10px; }
+        #board { top: 8px; right: max(8px, env(safe-area-inset-right)); min-width: 140px; }
+        #board h3 { margin-bottom: 4px; font-size: 8px; }
+        .ent { grid-template-columns: 14px 8px 1fr auto; gap: 5px; padding: 0; }
+        .ent .dot { width: 7px; height: 7px; }
+        .ent .pr { font-size: 9px; }
+        #help { display: none; }
+        #meters { bottom: max(10px, env(safe-area-inset-bottom)); gap: 10px; }
+        .meter { width: 96px; }
+        .meter .cap { font-size: 8px; margin-bottom: 3px; }
+        .meter .bar { height: 4px; }
+        #traps { bottom: 34px; padding: 6px 8px; gap: 4px; }
+        .trap { width: 44px; }
+        .trap .key { height: 22px; line-height: 20px; font-size: 11px; }
+        #restartBtn { top: 8px; padding: 6px 12px; font-size: 10px; }
+        #toast { font-size: 34px; }
+        #toast.sub { font-size: 16px; }
+        #overlay { overflow: auto; align-items: flex-start; }
+        #overlay .card { max-width: none; width: 100%; padding: 18px 20px; margin: 0; border-radius: 0; border-width: 0; }
+        #overlay h1 { font-size: 28px; }
+        #overlay .tag { font-size: 10px; margin: 4px 0 10px; }
+        #levelPicker, #modePicker { flex-wrap: wrap; gap: 6px; margin-bottom: 8px; font-size: 11px; }
+        #modePicker { margin-bottom: 12px; }
+        #overlay p { font-size: 12px; line-height: 1.55; margin-bottom: 10px; }
+        #overlay ul { font-size: 11.5px; line-height: 1.6; margin-bottom: 14px; }
+        #startBtn { width: 100%; padding: 12px; }
+      }
     </style>
   </head>
   <body>
@@ -167,6 +253,8 @@
       <div id="traps" class="panel"></div>
 
       <div id="help" class="panel"></div>
+      <button id="restartBtn">Restart</button>
+      <div id="stick"><span id="stickUp">›</span><div id="stickKnob"></div></div>
       <div id="crosshair"></div>
       <div id="toast"></div>
     </div>
@@ -182,9 +270,17 @@
           would rather you did not reach the gate.
         </p>
         <ul>
-          <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> roll &nbsp;·&nbsp; <kbd>Space</kbd> jump, hold in air to <b>tail-glide</b></li>
-          <li><kbd>Shift</kbd> sprint — burns the Run bar, and roughly doubles your jump</li>
-          <li>Mouse to steer the camera</li>
+          <li id="touchBlurb">
+            <b>Hold</b> a finger on the screen to run — a stick appears under it — and <b>slide</b> it left or right to steer,
+            or <b>push it up</b> to <b>sprint</b>: faster, and roughly double the jump, while the Run bar lasts.
+            <b>Press</b> with a second finger to jump, and <b>keep it held</b> to <b>tail-glide</b> on the
+            way down. <b>Slide that finger down</b> while it is held and the dog backflips to just behind
+            where it took off: the feint, to bait a trap. The run finger lifted at once is a jump too.
+          </li>
+          <li class="kb"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> roll &nbsp;·&nbsp; <kbd>Space</kbd> jump, hold in air to <b>tail-glide</b></li>
+          <li class="kb"><kbd>Shift</kbd> sprint — burns the Run bar, and roughly doubles your jump</li>
+          <li class="kb"><kbd>F</kbd> mid-jump — <b>flip back</b> to just behind where you took off, the feint that baits a trap</li>
+          <li class="kb">Mouse to steer the camera</li>
           <li>Ten traps along the course arm and fire <b>on their own</b> — the glowing markers tell you which are live</li>
           <li id="enemyBlurb" style="display: none">
             As the <b>enemy</b> you are behind the glass instead: the pack is all bots and the
@@ -193,7 +289,7 @@
             it — stand at it and press <kbd>E</kbd>. The course is hundreds of metres long and they
             cover it at speed, so you cannot hold all of it. Stop all six getting through.
           </li>
-          <li><kbd>R</kbd> restart run &nbsp;·&nbsp; <kbd>Esc</kbd> release mouse</li>
+          <li class="kb"><kbd>R</kbd> restart run &nbsp;·&nbsp; <kbd>Esc</kbd> release mouse</li>
         </ul>
         <button id="startBtn" disabled><span id="btnLabel">Loading…</span></button>
       </div>
